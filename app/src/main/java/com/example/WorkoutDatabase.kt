@@ -12,7 +12,8 @@ data class Workout(
     @PrimaryKey(autoGenerate = true) val id: Int = 0,
     val name: String,
     val totalSets: Int,
-    val setPreferencesJson: String
+    val setPreferencesJson: String,
+    @ColumnInfo(name = "display_order", defaultValue = "0") val displayOrder: Int = 0
 )
 
 class WorkoutTypeConverters {
@@ -40,7 +41,7 @@ class WorkoutTypeConverters {
 
 @Dao
 interface WorkoutDao {
-    @Query("SELECT * FROM workouts ORDER BY id DESC")
+    @Query("SELECT * FROM workouts ORDER BY display_order ASC, id DESC")
     fun getAllWorkouts(): Flow<List<Workout>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
@@ -53,7 +54,7 @@ interface WorkoutDao {
     suspend fun deleteById(id: Int)
 }
 
-@Database(entities = [Workout::class], version = 1, exportSchema = false)
+@Database(entities = [Workout::class], version = 2, exportSchema = false)
 @TypeConverters(WorkoutTypeConverters::class)
 abstract class WorkoutDatabase : RoomDatabase() {
     abstract fun workoutDao(): WorkoutDao

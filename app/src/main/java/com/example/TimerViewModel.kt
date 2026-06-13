@@ -182,10 +182,12 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
             val currentState = _uiState.value
             val converters = WorkoutTypeConverters()
             val json = converters.fromSetPreferencesList(currentState.setPreferencesList)
+            val maxOrder = currentState.workouts.maxOfOrNull { it.displayOrder } ?: 0
             val workout = Workout(
                 name = name,
                 totalSets = currentState.totalSets,
-                setPreferencesJson = json
+                setPreferencesJson = json,
+                displayOrder = maxOrder + 1
             )
             val newId = repository.insert(workout).toInt()
             _uiState.update { state ->
@@ -206,11 +208,14 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val converters = WorkoutTypeConverters()
             val json = converters.fromSetPreferencesList(currentState.setPreferencesList)
+            val existingWorkout = currentState.workouts.find { it.id == currentId }
+            val order = existingWorkout?.displayOrder ?: 0
             val workout = Workout(
                 id = currentId,
                 name = currentName,
                 totalSets = currentState.totalSets,
-                setPreferencesJson = json
+                setPreferencesJson = json,
+                displayOrder = order
             )
             repository.insert(workout)
         }
@@ -223,13 +228,33 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             val converters = WorkoutTypeConverters()
             val json = converters.fromSetPreferencesList(currentState.setPreferencesList)
+            val existingWorkout = currentState.workouts.find { it.id == currentId }
+            val order = existingWorkout?.displayOrder ?: 0
             val workout = Workout(
                 id = currentId,
                 name = currentName,
                 totalSets = currentState.totalSets,
-                setPreferencesJson = json
+                setPreferencesJson = json,
+                displayOrder = order
             )
             repository.insert(workout)
+        }
+    }
+
+    fun reorderWorkouts(fromIndex: Int, toIndex: Int) {
+        val currentList = _uiState.value.workouts.toMutableList()
+        if (fromIndex !in currentList.indices || toIndex !in currentList.indices) return
+        val moved = currentList.removeAt(fromIndex)
+        currentList.add(toIndex, moved)
+        
+        // Optimistically update local UI state index order immediately to prevent visual stuttering
+        _uiState.update { it.copy(workouts = currentList) }
+
+        viewModelScope.launch {
+            currentList.forEachIndexed { idx, w ->
+                val updated = w.copy(displayOrder = idx)
+                repository.insert(updated)
+            }
         }
     }
 

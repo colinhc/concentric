@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,9 +39,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -91,6 +95,7 @@ fun WorkoutTimerApp(
     viewModel: TimerViewModel = viewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
+    val density = LocalDensity.current
     val scrollState = rememberScrollState()
     var showSettings by remember { mutableStateOf(false) }
 
@@ -180,6 +185,46 @@ fun WorkoutTimerApp(
             ) {
                 var showSaveDialog by remember { mutableStateOf(false) }
 
+                var draggedIndex by remember { mutableStateOf<Int?>(null) }
+                var dragOffsetY by remember { mutableStateOf(0f) }
+                var itemHeightPx by remember { mutableStateOf(0f) }
+                var containerHeightPx by remember { mutableStateOf(0f) }
+                val listScrollState = rememberScrollState()
+
+                LaunchedEffect(draggedIndex) {
+                    if (draggedIndex != null) {
+                        while (true) {
+                            val idx = draggedIndex ?: break
+                            val nominalItemTop = idx * itemHeightPx
+                            val currentScroll = listScrollState.value
+                            val visualYInViewport = nominalItemTop - currentScroll + dragOffsetY
+                            
+                            val topThreshold = with(density) { 40.dp.toPx() }
+                            val bottomThreshold = containerHeightPx - with(density) { 40.dp.toPx() }
+                            
+                            var scrollSpeed = 0
+                            if (visualYInViewport < topThreshold && currentScroll > 0) {
+                                val distanceRatio = ((topThreshold - visualYInViewport) / topThreshold).coerceIn(0f, 1f)
+                                scrollSpeed = -(distanceRatio * 20f + 5f).toInt()
+                            } else if (visualYInViewport > bottomThreshold && containerHeightPx > 0 && currentScroll < listScrollState.maxValue) {
+                                val distanceRatio = ((visualYInViewport - bottomThreshold) / topThreshold).coerceIn(0f, 1f)
+                                scrollSpeed = (distanceRatio * 20f + 5f).toInt()
+                            }
+                            
+                            if (scrollSpeed != 0) {
+                                val targetScroll = (currentScroll + scrollSpeed).coerceIn(0, listScrollState.maxValue)
+                                val actualDelta = targetScroll - currentScroll
+                                if (actualDelta != 0) {
+                                    listScrollState.scrollTo(targetScroll)
+                                    dragOffsetY += actualDelta
+                                }
+                            }
+                            
+                            kotlinx.coroutines.delay(16)
+                        }
+                    }
+                }
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -259,10 +304,15 @@ fun WorkoutTimerApp(
                         modifier = Modifier
                             .fillMaxWidth()
                             .heightIn(max = 240.dp)
-                            .verticalScroll(rememberScrollState()),
+                            .onGloballyPositioned { coordinates ->
+                                if (coordinates.size.height > 0) {
+                                    containerHeightPx = coordinates.size.height.toFloat()
+                                }
+                            }
+                            .verticalScroll(listScrollState),
                         verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        state.workouts.forEach { workout ->
+                        state.workouts.forEachIndexed { index, workout ->
                             val isSelected = state.activeWorkoutId == workout.id
                             val borderColor = if (isSelected) Color(0xFFDC2626) else Color.White.copy(alpha = 0.05f)
                             val borderWeight = if (isSelected) 1.5.dp else 1.dp
@@ -270,6 +320,54 @@ fun WorkoutTimerApp(
                             Surface(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .onGloballyPositioned { coordinates ->
+                                        if (coordinates.size.height > 0) {
+                                            itemHeightPx = coordinates.size.height.toFloat() + with(density) { 10.dp.toPx() }
+                                        }
+                                    }
+                                    .graphicsLayer {
+                                        translationY = if (draggedIndex == index) dragOffsetY else 0f
+                                        shadowElevation = if (draggedIndex == index) 16.dp.toPx() else 0f
+                                        scaleX = if (draggedIndex == index) 1.05f else 1.0f
+                                        scaleY = if (draggedIndex == index) 1.05f else 1.0f
+                                        alpha = if (draggedIndex != null && draggedIndex != index) 0.6f else 1.0f
+                                    }
+                                    .pointerInput(index) {
+                                        detectDragGesturesAfterLongPress(
+                                            onDragStart = { offset ->
+                                                draggedIndex = index
+                                                dragOffsetY = 0f
+                                            },
+                                            onDrag = { change, dragAmount ->
+                                                change.consume()
+                                                dragOffsetY += dragAmount.y
+                                                
+                                                val currentDragged = draggedIndex
+                                                if (currentDragged != null && itemHeightPx > 0) {
+                                                    if (dragOffsetY > itemHeightPx / 2f && currentDragged < state.workouts.lastIndex) {
+                                                        val targetIndex = currentDragged + 1
+                                                        viewModel.reorderWorkouts(currentDragged, targetIndex)
+                                                        draggedIndex = targetIndex
+                                                        dragOffsetY -= itemHeightPx
+                                                    }
+                                                    else if (dragOffsetY < -itemHeightPx / 2f && currentDragged > 0) {
+                                                        val targetIndex = currentDragged - 1
+                                                        viewModel.reorderWorkouts(currentDragged, targetIndex)
+                                                        draggedIndex = targetIndex
+                                                        dragOffsetY += itemHeightPx
+                                                    }
+                                                }
+                                            },
+                                            onDragEnd = {
+                                                draggedIndex = null
+                                                dragOffsetY = 0f
+                                            },
+                                            onDragCancel = {
+                                                draggedIndex = null
+                                                dragOffsetY = 0f
+                                            }
+                                        )
+                                    }
                                     .clickable { viewModel.loadWorkout(workout) },
                                 color = if (isSelected) Color(0xFF1E1E24) else Color(0xFF1C1C1E),
                                 shape = RoundedCornerShape(16.dp),
@@ -331,18 +429,30 @@ fun WorkoutTimerApp(
                                         )
                                     }
 
-                                    IconButton(
-                                        onClick = { viewModel.deleteWorkout(workout.id) },
-                                        modifier = Modifier
-                                            .size(28.dp)
-                                            .testTag("delete_workout_${workout.id}")
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.Delete,
-                                            contentDescription = "Delete Workout",
-                                            tint = Color.White.copy(alpha = 0.3f),
+                                            imageVector = Icons.Default.Menu,
+                                            contentDescription = "Press and hold to reorder",
+                                            tint = Color.White.copy(alpha = 0.2f),
                                             modifier = Modifier.size(16.dp)
                                         )
+                                        Spacer(modifier = Modifier.width(4.dp))
+                                        IconButton(
+                                            onClick = { viewModel.deleteWorkout(workout.id) },
+                                            modifier = Modifier
+                                                .size(28.dp)
+                                                .testTag("delete_workout_${workout.id}")
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.Delete,
+                                                contentDescription = "Delete Workout",
+                                                tint = Color.White.copy(alpha = 0.3f),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
                                     }
                                 }
                             }
