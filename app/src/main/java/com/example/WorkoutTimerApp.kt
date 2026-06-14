@@ -134,14 +134,14 @@ fun WorkoutTimerApp(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Timer,
-                            contentDescription = "Concentric Icon",
+                            contentDescription = "Loop Icon",
                             tint = Color.White,
                             modifier = Modifier.size(20.dp)
                         )
                     }
                     Column {
                         Text(
-                            text = "Concentric",
+                            text = "Loop",
                             style = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFFE2E2E6),

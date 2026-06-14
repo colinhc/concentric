@@ -71,7 +71,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
                 if (!hasLoadedLastActive && list.isNotEmpty()) {
                     hasLoadedLastActive = true
-                    val sharedPrefs = getApplication<Application>().getSharedPreferences("concentric_prefs", Context.MODE_PRIVATE)
+                    val sharedPrefs = getApplication<Application>().getSharedPreferences("loop_prefs", Context.MODE_PRIVATE)
                     val lastId = sharedPrefs.getInt("last_active_workout_id", -1)
                     if (lastId != -1) {
                         val matchingWorkout = list.find { it.id == lastId }
@@ -173,7 +173,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 activeWorkoutName = workout.name
             )
         }
-        val sharedPrefs = getApplication<Application>().getSharedPreferences("concentric_prefs", Context.MODE_PRIVATE)
+        val sharedPrefs = getApplication<Application>().getSharedPreferences("loop_prefs", Context.MODE_PRIVATE)
         sharedPrefs.edit().putInt("last_active_workout_id", workout.id).apply()
     }
 
@@ -196,7 +196,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                     activeWorkoutName = name
                 )
             }
-            val sharedPrefs = getApplication<Application>().getSharedPreferences("concentric_prefs", Context.MODE_PRIVATE)
+            val sharedPrefs = getApplication<Application>().getSharedPreferences("loop_prefs", Context.MODE_PRIVATE)
             sharedPrefs.edit().putInt("last_active_workout_id", newId).apply()
         }
     }
@@ -262,7 +262,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             repository.deleteById(id)
             if (_uiState.value.activeWorkoutId == id) {
-                val sharedPrefs = getApplication<Application>().getSharedPreferences("concentric_prefs", Context.MODE_PRIVATE)
+                val sharedPrefs = getApplication<Application>().getSharedPreferences("loop_prefs", Context.MODE_PRIVATE)
                 sharedPrefs.edit().remove("last_active_workout_id").apply()
                 _uiState.update { state ->
                     state.copy(
