@@ -2,6 +2,7 @@ package com.example
 
 import android.app.Application
 import android.content.Context
+import android.os.PowerManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Job
@@ -43,6 +44,33 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     private var timerJob: Job? = null
     private var lastPlayedSecond: Int = -1
 
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    private fun getWakeLock(): PowerManager.WakeLock {
+        if (wakeLock == null) {
+            val powerManager = getApplication<Application>().getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "WorkoutTimer:TimerWakeLock").apply {
+                setReferenceCounted(false)
+            }
+        }
+        return wakeLock!!
+    }
+
+    private fun releaseWakeLock() {
+        try {
+            if (wakeLock?.isHeld == true) {
+                wakeLock?.release()
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+        try {
+            TimerService.stopService(getApplication())
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
     private val database = WorkoutDatabase.getDatabase(application)
     private val repository = WorkoutRepository(database.workoutDao())
 
@@ -58,7 +86,17 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 else -> SetPreferences(durationSeconds = 20, startBeepSeconds = 3, endAlarmSeconds = 3, startSound = SoundManager.SOUND_BEEP_MED, endSound = SoundManager.SOUND_BEEP_HIGH)
             }
         }
-        _uiState.update { it.copy(setPreferencesList = initialList) }
+        val sharedPrefs = application.getSharedPreferences("loop_prefs", Context.MODE_PRIVATE)
+        val savedStart = sharedPrefs.getString("universal_start_sound", SoundManager.SOUND_BEEP_MED) ?: SoundManager.SOUND_BEEP_MED
+        val savedEnd = sharedPrefs.getString("universal_end_sound", SoundManager.SOUND_BEEP_HIGH) ?: SoundManager.SOUND_BEEP_HIGH
+
+        _uiState.update { state ->
+            state.copy(
+                setPreferencesList = initialList,
+                universalStartSound = savedStart,
+                universalEndSound = savedEnd
+            )
+        }
 
         var hasLoadedLastActive = false
 
@@ -148,6 +186,18 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                 universalStartSound = startSound ?: state.universalStartSound,
                 universalEndSound = endSound ?: state.universalEndSound
             )
+        }
+        val sharedPrefs = getApplication<Application>().getSharedPreferences("loop_prefs", Context.MODE_PRIVATE)
+        sharedPrefs.edit().apply {
+            if (startSound != null) putString("universal_start_sound", startSound)
+            if (endSound != null) putString("universal_end_sound", endSound)
+            apply()
+        }
+    }
+
+    fun playSound(soundName: String) {
+        viewModelScope.launch {
+            soundManager.playSound(soundName)
         }
     }
 
@@ -286,6 +336,18 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         if (_uiState.value.totalSets == 0) return
         _uiState.update { it.copy(isRunning = true) }
         
+        try {
+            getWakeLock().acquire(10 * 3600 * 1000L) // 10-hour safe timeout to protect battery
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        try {
+            TimerService.startService(getApplication())
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
         timerJob?.cancel()
         timerJob = viewModelScope.launch {
             while (_uiState.value.isRunning) {
@@ -332,13 +394,19 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         timerJob?.cancel()
-                        // Glorious victory celebration chimes
-                        launch {
-                            soundManager.playSound(SoundManager.SOUND_BEEP_HIGH, 120)
-                            delay(150)
-                            soundManager.playSound(SoundManager.SOUND_BEEP_HIGH, 120)
-                            delay(150)
-                            soundManager.playSound(SoundManager.SOUND_SWEEP_UP, 400)
+                        // Play the user-chosen count out sound 3 times in the shortest burst to signal workout finished
+                        viewModelScope.launch {
+                            try {
+                                val countOutSound = state.universalEndSound
+                                for (i in 0 until 3) {
+                                    soundManager.playSound(countOutSound, 70)
+                                    if (i < 2) {
+                                        delay(80)
+                                    }
+                                }
+                            } finally {
+                                releaseWakeLock()
+                            }
                         }
                     }
                 } else {
@@ -351,6 +419,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
     fun pauseTimer() {
         _uiState.update { it.copy(isRunning = false) }
         timerJob?.cancel()
+        releaseWakeLock()
         viewModelScope.launch {
             soundManager.playSound(SoundManager.SOUND_TICK, 10)
         }
@@ -358,6 +427,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetTimer() {
         pauseTimer()
+        releaseWakeLock()
         lastPlayedSecond = -1
         _uiState.update {
             it.copy(
@@ -368,5 +438,11 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             soundManager.playSound(SoundManager.SOUND_BEEP_LOW, 300)
         }
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        timerJob?.cancel()
+        releaseWakeLock()
     }
 }

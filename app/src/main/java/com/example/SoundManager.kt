@@ -1,5 +1,6 @@
 package com.example
 
+import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioManager
 import android.media.AudioTrack
@@ -35,11 +36,19 @@ class SoundManager {
                     SOUND_BEEP_MED -> playTone(660f, durationMs, sampleRate)
                     SOUND_BEEP_HIGH -> playTone(1320f, durationMs, sampleRate)
                     SOUND_DOUBLE_BEEP -> {
-                        playTone(1000f, 80, sampleRate)
-                        Thread.sleep(60)
-                        playTone(1000f, 80, sampleRate)
+                        if (durationMs > 200) {
+                            val activeDur = (durationMs * 0.4).toInt()
+                            val sleepDur = (durationMs * 0.2).toInt()
+                            playTone(1000f, activeDur, sampleRate)
+                            Thread.sleep(sleepDur.toLong())
+                            playTone(1000f, activeDur, sampleRate)
+                        } else {
+                            playTone(1000f, 80, sampleRate)
+                            Thread.sleep(60)
+                            playTone(1000f, 80, sampleRate)
+                        }
                     }
-                    SOUND_SWEEP_UP -> playSweep(440f, 1500f, 300, sampleRate)
+                    SOUND_SWEEP_UP -> playSweep(440f, 1500f, durationMs, sampleRate)
                     SOUND_SIREN -> playSiren(400, sampleRate)
                     SOUND_TICK -> playTick(sampleRate)
                     else -> playTone(880f, durationMs, sampleRate)
@@ -123,9 +132,67 @@ class SoundManager {
         writeToAudioTrack(samples, sampleRate)
     }
 
+    private fun playVictoryFanfare(sampleRate: Int) {
+        playTone(523.25f, 100, sampleRate)
+        playTone(659.25f, 100, sampleRate)
+        playTone(783.99f, 100, sampleRate)
+        playTone(1046.50f, 150, sampleRate)
+    }
+
+    private fun playCelestialChimes(sampleRate: Int) {
+        val durationMs = 500
+        val numSamples = (durationMs * sampleRate / 1000)
+        val samples = FloatArray(numSamples)
+        for (i in 0 until numSamples) {
+            val progress = i.toFloat() / numSamples
+            val angle1 = 2.0 * Math.PI * 1200f * i / sampleRate
+            val angle2 = 2.0 * Math.PI * 1500f * i / sampleRate
+            val angle3 = 2.0 * Math.PI * 1800f * i / sampleRate
+            val envelope = (1f - progress) * (1f - progress)
+            samples[i] = (sin(angle1) * 0.4f + sin(angle2) * 0.3f + sin(angle3) * 0.3f).toFloat() * envelope
+        }
+        writeToAudioTrack(samples, sampleRate)
+    }
+
+    private fun playTrill(sampleRate: Int) {
+        val durationMs = 500
+        val numSamples = (durationMs * sampleRate / 1000)
+        val samples = FloatArray(numSamples)
+        for (i in 0 until numSamples) {
+            val progress = i.toFloat() / numSamples
+            val isA = (i / (sampleRate * 0.045f).toInt()) % 2 == 0
+            val freq = if (isA) 880f else 1174.66f
+            val angle = 2.0 * Math.PI * freq * i / sampleRate
+            val envelope = 1f - progress
+            samples[i] = sin(angle).toFloat() * envelope
+        }
+        writeToAudioTrack(samples, sampleRate)
+    }
+
+    private fun playBubblingSynth(sampleRate: Int) {
+        val durationMs = 500
+        val numSamples = (durationMs * sampleRate / 1000)
+        val samples = FloatArray(numSamples)
+        for (i in 0 until numSamples) {
+            val progress = i.toFloat() / numSamples
+            val step = (progress * 6).toInt()
+            val freq = 440f + step * 160f
+            val angle = 2.0 * Math.PI * freq * i / sampleRate
+            val envelope = 1f - progress
+            samples[i] = sin(angle).toFloat() * envelope
+        }
+        writeToAudioTrack(samples, sampleRate)
+    }
+
     private fun writeToAudioTrack(samples: FloatArray, sampleRate: Int) {
         try {
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build()
+
             val audioTrack = AudioTrack.Builder()
+                .setAudioAttributes(audioAttributes)
                 .setAudioFormat(
                     AudioFormat.Builder()
                         .setEncoding(AudioFormat.ENCODING_PCM_FLOAT)

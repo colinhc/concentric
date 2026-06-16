@@ -19,6 +19,22 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     enableEdgeToEdge()
     window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+    // Request notification permission if Android 13+
+    if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU) {
+      val permissionState = androidx.core.content.ContextCompat.checkSelfPermission(
+        this,
+        android.Manifest.permission.POST_NOTIFICATIONS
+      )
+      if (permissionState != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+        androidx.core.app.ActivityCompat.requestPermissions(
+          this,
+          arrayOf(android.Manifest.permission.POST_NOTIFICATIONS),
+          101
+        )
+      }
+    }
+
     setContent {
       MyApplicationTheme {
         WorkoutTimerApp()

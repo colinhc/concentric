@@ -743,6 +743,7 @@ fun WorkoutTimerApp(
                                 Surface(
                                     modifier = Modifier.clickable {
                                         viewModel.updateUniversalSounds(startSound = soundName)
+                                        viewModel.playSound(soundName)
                                     },
                                     color = if (isSelected) Color(0xFFEAB308) else Color(0xFF1C1C1C),
                                     shape = RoundedCornerShape(20.dp)
@@ -777,7 +778,7 @@ fun WorkoutTimerApp(
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFFE2E2E6)
-                            )
+                             )
                         )
                         Row(
                             modifier = Modifier
@@ -791,6 +792,7 @@ fun WorkoutTimerApp(
                                 Surface(
                                     modifier = Modifier.clickable {
                                         viewModel.updateUniversalSounds(endSound = soundName)
+                                        viewModel.playSound(soundName)
                                     },
                                     color = if (isSelected) Color(0xFFF97316) else Color(0xFF1C1C1C),
                                     shape = RoundedCornerShape(20.dp)
@@ -817,7 +819,7 @@ fun WorkoutTimerApp(
                             }
                         }
                     }
-                    
+
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "@2026 Colin C",
