@@ -337,7 +337,7 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update { it.copy(isRunning = true) }
         
         try {
-            getWakeLock().acquire(10 * 3600 * 1000L) // 10-hour safe timeout to protect battery
+            getWakeLock().acquire(1 * 3600 * 1000L) // 1-hour safe timeout to protect battery
         } catch (e: Exception) {
             e.printStackTrace()
         }
@@ -394,16 +394,10 @@ class TimerViewModel(application: Application) : AndroidViewModel(application) {
                             )
                         }
                         timerJob?.cancel()
-                        // Play the user-chosen count out sound 3 times in the shortest burst to signal workout finished
+                        // Play the triple burst sound to signal workout finished
                         viewModelScope.launch {
                             try {
-                                val countOutSound = state.universalEndSound
-                                for (i in 0 until 3) {
-                                    soundManager.playSound(countOutSound, 70)
-                                    if (i < 2) {
-                                        delay(80)
-                                    }
-                                }
+                                soundManager.playSound(SoundManager.SOUND_TRIPLE_BURST)
                             } finally {
                                 releaseWakeLock()
                             }
