@@ -3,6 +3,13 @@ package com.example
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -45,6 +52,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.ui.platform.testTag
@@ -101,13 +112,72 @@ fun WorkoutTimerApp(
     val scrollState = rememberScrollState()
     var showSettings by remember { mutableStateOf(false) }
 
-    Scaffold(
+    // Dynamic states to track the clock dial center & radius relative to root coordinates
+    var clockFaceCenterInRoot by remember { mutableStateOf<Offset?>(null) }
+    var clockFaceRadiusInRoot by remember { mutableStateOf(0f) }
+
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF0A0A0A)), // Immersive deep black canvas
-        containerColor = Color(0xFF0A0A0A)
-    ) { innerPadding ->
-        Column(
+            .background(Color(0xFF0A0A0A)) // Immersive deep black canvas base
+    ) {
+        Image(
+            painter = painterResource(id = R.drawable.ic_launcher_artwork),
+            contentDescription = null,
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    translationY = -scrollState.value * 0.15f // Modulate scrolling offset for floaty parallax effect
+                    scaleX = 1.15f
+                    scaleY = 1.15f
+                },
+            contentScale = ContentScale.Crop,
+            alpha = 0.30f // High-visibility base alpha, shown fully inside the cutout lens!
+        )
+
+        // Draw the dark overlay mask with a dynamic circular hole punched out for the clock face
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val rectPath = Path().apply {
+                addRect(Rect(0f, 0f, size.width, size.height))
+            }
+            
+            val circlePath = Path().apply {
+                val center = clockFaceCenterInRoot
+                val radius = clockFaceRadiusInRoot
+                if (center != null && radius > 0f) {
+                    addOval(
+                        Rect(
+                            left = center.x - radius,
+                            top = center.y - radius,
+                            right = center.x + radius,
+                            bottom = center.y + radius
+                        )
+                    )
+                }
+            }
+            
+            val maskPath = if (clockFaceCenterInRoot != null && clockFaceRadiusInRoot > 0f) {
+                Path.combine(
+                    operation = PathOperation.Difference,
+                    path1 = rectPath,
+                    path2 = circlePath
+                )
+            } else {
+                rectPath
+            }
+            
+            // Mask 0xFF0A0A0A drawn over background with 0.82f alpha, leaving ~5.4% subtle image visibility outside the cutout
+            drawPath(
+                path = maskPath,
+                color = Color(0xFF0A0A0A).copy(alpha = 0.82f)
+            )
+        }
+
+        Scaffold(
+            modifier = Modifier.fillMaxSize(),
+            containerColor = Color.Transparent // Allow background artwork to shine through seamlessly
+        ) { innerPadding ->
+            Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
@@ -568,7 +638,12 @@ fun WorkoutTimerApp(
                     boxWidthPx = boxWidthPx,
                     isRunning = state.isRunning,
                     onTogglePlay = { viewModel.toggleStartPause() },
-                    onReset = { viewModel.resetTimer() }
+                    onReset = { viewModel.resetTimer() },
+                    onGlobalsChanged = { center, radius ->
+                        clockFaceCenterInRoot = center
+                        clockFaceRadiusInRoot = radius
+                    },
+                    selectedSet = state.selectedSet
                 )
             }
 
@@ -850,6 +925,7 @@ fun WorkoutTimerApp(
             modifier = Modifier.testTag("settings_dialog")
         )
     }
+  }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -863,15 +939,51 @@ fun ClockDial(
     boxWidthPx: Float,
     isRunning: Boolean,
     onTogglePlay: () -> Unit,
-    onReset: () -> Unit
+    onReset: () -> Unit,
+    onGlobalsChanged: (center: Offset, radius: Float) -> Unit = { _, _ -> },
+    selectedSet: Int = 1
 ) {
     val density = LocalDensity.current
     val strokeWidthRing = with(density) { 6.dp.toPx() }
     
+    // Check if the actual active workout phase is running or has progress
+    val isWorkoutActive = isRunning || elapsedSeconds > 0f || activeSetIndex > 1
+
+    // Infinite breathing/glowing animation for selected ring track/fill
+    val infiniteTransition = rememberInfiniteTransition(label = "ring_glowing")
+    val pulseAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 1000, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "pulse_alpha"
+    )
+
+    // Flash animation triggered when active selected set custom duration or countdown counts are modified
+    val selectedSetPref = if (selectedSet in preferencesList.indices) preferencesList[selectedSet] else null
+    val flashAnimatable = remember { Animatable(0f) }
+
+    LaunchedEffect(
+        selectedSetPref?.durationSeconds,
+        selectedSetPref?.startBeepSeconds,
+        selectedSetPref?.endAlarmSeconds
+    ) {
+        if (selectedSetPref != null) {
+            flashAnimatable.snapTo(1f)
+            flashAnimatable.animateTo(
+                targetValue = 0f,
+                animationSpec = tween(durationMillis = 500, easing = LinearOutSlowInEasing)
+            )
+        }
+    }
+
     // As per user requirement, let's keep the core black dial 35% of bounding box dimensions
     val baseBlackDialRadius = boxWidthPx * 0.35f
     
-    val activePref = if (totalSets > 0 && activeSetIndex <= totalSets) preferencesList[activeSetIndex] else SetPreferences()
+    val displaySetIndex = if (isWorkoutActive) activeSetIndex else selectedSet
+    val activePref = if (totalSets > 0 && displaySetIndex in preferencesList.indices) preferencesList[displaySetIndex] else SetPreferences()
     val T_prep = activePref.startBeepSeconds.toFloat()
     val T_active = activePref.durationSeconds.toFloat()
     val rawProgress = if (elapsedSeconds < T_prep) {
@@ -921,9 +1033,21 @@ fun ClockDial(
                     val ringRadius = baseBlackDialRadius + baseRingMargin + (i - 1) * gapBetweenRings
                     val ringColor = if (i == totalSets) Color(0xFFDC2626) else ringColors[(i - 1) % ringColors.size]
                     
+                    val isSelectedRingInEdit = !isWorkoutActive && (i == selectedSet)
+                    val isWorkoutPaused = isWorkoutActive && !isRunning
+                    val isActiveRingPaused = isWorkoutPaused && (i == activeSetIndex)
+                    
+                    val trackColor = if (isActiveRingPaused) {
+                        ringColor.copy(alpha = pulseAlpha * 0.45f)
+                    } else if (isSelectedRingInEdit) {
+                        ringColor.copy(alpha = 0.25f)
+                    } else {
+                        Color(0xFF1C1C1E)
+                    }
+
                     // Solid dark anthracite background track for the inactive ring portion
                     drawCircle(
-                        color = Color(0xFF1C1C1E),
+                        color = trackColor,
                         radius = ringRadius,
                         center = center,
                         style = Stroke(width = strokeWidthRing)
@@ -951,16 +1075,51 @@ fun ClockDial(
                         else -> rawProgress
                     }
                     
-                    // Solid colored progress arc representing completion
+                    // Solid colored progress arc representing completion (pulses if active ring is paused)
                     if (progressValue > 0f) {
                         drawArc(
-                            color = ringColor,
+                            color = if (isActiveRingPaused) ringColor.copy(alpha = pulseAlpha) else ringColor,
                             startAngle = -90f,
                             sweepAngle = 360f * progressValue,
                             useCenter = false,
                             topLeft = Offset(center.x - ringRadius, center.y - ringRadius),
                             size = Size(ringRadius * 2, ringRadius * 2),
                             style = Stroke(width = strokeWidthRing, cap = StrokeCap.Butt)
+                        )
+                    }
+                    
+                    if (isSelectedRingInEdit) {
+                        // Solid, non-breathing ring highlight when configuring
+                        drawArc(
+                            color = ringColor.copy(alpha = 0.85f),
+                            startAngle = -90f,
+                            sweepAngle = 360f,
+                            useCenter = false,
+                            topLeft = Offset(center.x - ringRadius, center.y - ringRadius),
+                            size = Size(ringRadius * 2, ringRadius * 2),
+                            style = Stroke(width = strokeWidthRing, cap = StrokeCap.Butt)
+                        )
+                    } else if (isActiveRingPaused && progressValue <= 0f) {
+                        // Gently pulse when active set is paused and progress hasn't started yet (concentric breathing animation)
+                        drawArc(
+                            color = ringColor.copy(alpha = pulseAlpha),
+                            startAngle = -90f,
+                            sweepAngle = 360f,
+                            useCenter = false,
+                            topLeft = Offset(center.x - ringRadius, center.y - ringRadius),
+                            size = Size(ringRadius * 2, ringRadius * 2),
+                            style = Stroke(width = strokeWidthRing, cap = StrokeCap.Butt)
+                        )
+                    }
+
+                    // Flash feedback overlay on top of selected set ring if changed
+                    if (!isWorkoutActive && i == selectedSet && flashAnimatable.value > 0f) {
+                        val flashAmount = flashAnimatable.value
+                        drawCircle(
+                            color = Color.White.copy(alpha = flashAmount * 0.85f),
+                            radius = ringRadius,
+                            center = center,
+                            style = Stroke(width = strokeWidthRing + 2.dp.toPx())
                         )
                     }
                 }
@@ -1009,20 +1168,30 @@ fun ClockDial(
             }
         }
 
-        // 4. Centered gorgeous solid black disk with display indicators and Play/Pause action button
+        // 4. Centered gorgeous transparent/translucent disk with display indicators and Play/Pause action button
         Box(
             modifier = Modifier
                 .size((baseBlackDialRadius * 2 / with(density) { 1.dp.toPx() }).dp)
                 .clip(CircleShape)
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(Color(0xFF141414), Color(0xFF000000)),
+                        colors = listOf(Color.Transparent, Color.Black.copy(alpha = 0.42f)),
                         radius = baseBlackDialRadius
                     )
                 )
+                .onGloballyPositioned { coordinates ->
+                    val pos = coordinates.positionInRoot()
+                    val center = Offset(
+                        x = pos.x + coordinates.size.width / 2f,
+                        y = pos.y + coordinates.size.height / 2f
+                    )
+                    val radius = coordinates.size.width / 2f
+                    onGlobalsChanged(center, radius)
+                }
                 .shadow(elevation = 16.dp, shape = CircleShape),
             contentAlignment = Alignment.Center
         ) {
+
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center,
@@ -1030,17 +1199,18 @@ fun ClockDial(
             ) {
                 // Header Set Tag info
                 if (totalSets > 0) {
-                    val activePref = if (activeSetIndex <= totalSets) preferencesList[activeSetIndex] else SetPreferences()
+                    val displaySetIndex = if (isWorkoutActive) activeSetIndex else selectedSet
+                    val activePref = if (totalSets > 0 && displaySetIndex in preferencesList.indices) preferencesList[displaySetIndex] else SetPreferences()
                     val T_prep = activePref.startBeepSeconds
                     val isPreparing = elapsedSeconds < T_prep
                     val labelText = if (isPreparing) {
-                        "COUNT IN - SET $activeSetIndex"
+                        "COUNT IN - SET $displaySetIndex"
                     } else {
-                        "SET $activeSetIndex OF $totalSets"
+                        "SET $displaySetIndex OF $totalSets"
                     }
                     val labelColor = if (isPreparing) {
                         Color(0xFFEAB308) // Amber Count In color
-                    } else if (activeSetIndex == totalSets) {
+                    } else if (displaySetIndex == totalSets) {
                         Color(0xFFDC2626) // Last set ruby color
                     } else {
                         Color(0xFF43A047) // Active set emerald green color
@@ -1070,7 +1240,8 @@ fun ClockDial(
 
                 // Digital Timer Clock Reading
                 val remainingSec = if (totalSets > 0) {
-                    val activePref = if (activeSetIndex <= totalSets) preferencesList[activeSetIndex] else SetPreferences()
+                    val displaySetIndex = if (isWorkoutActive) activeSetIndex else selectedSet
+                    val activePref = if (totalSets > 0 && displaySetIndex in preferencesList.indices) preferencesList[displaySetIndex] else SetPreferences()
                     val T_prep = activePref.startBeepSeconds
                     if (elapsedSeconds < T_prep) {
                         kotlin.math.ceil((T_prep - elapsedSeconds).toDouble()).toFloat().coerceAtLeast(1f)

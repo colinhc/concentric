@@ -195,7 +195,7 @@ class SoundManager {
     private fun writeToAudioTrack(samples: FloatArray, sampleRate: Int) {
         try {
             val audioAttributes = AudioAttributes.Builder()
-                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setUsage(AudioAttributes.USAGE_MEDIA)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
 
